@@ -21,9 +21,14 @@ jobs:
         cache: 'pip'
     - name: Install dependencies
       run: |
+        echo "Instalando dependencias..."
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        echo "Instalación de dependencias completa."
     - name: Login to WandB
-      run: wandb login ${{ secrets.WANDB_API_KEY }}
+      run: |
+        echo "Iniciando sesión en WandB..."
+        wandb login ${{ secrets.WANDB_API_KEY }}
+        echo "Inicio de sesión exitoso."
     - name: Run load.py
       run: python src/data/load.py --IdExecution ${{ github.run_number }}
