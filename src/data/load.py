@@ -6,6 +6,7 @@ import wandb
 from sklearn import datasets
 from sklearn.model_selection import train_test_split
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--IdExecution', type=str, help='ID of the execution')
 args = parser.parse_args()
