@@ -23,6 +23,7 @@ jobs:
         echo "Instalando dependencias..."
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install scikit-learn  # Agrega la instalación de scikit-learn
         echo "Instalación de dependencias completa."
     - name: Login to WandB
       run: |
