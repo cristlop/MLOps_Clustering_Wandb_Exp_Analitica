@@ -1,7 +1,7 @@
 import torch
 import torchvision
 from torch.utils.data import TensorDataset
-from sklearn import datasets
+from sklearn import datasets  # Importa el módulo 'datasets' desde 'sklearn'
 import argparse
 import wandb
 
@@ -13,7 +13,11 @@ if args.IdExecution:
     print(f"IdExecution: {args.IdExecution}")
 
 def load(train_size=.8):
-    # Load the Wisconsin Breast Cancer dataset
+    """
+    # Load the data
+    """
+      
+    # the data, split between train and test sets
     wbcd = datasets.load_breast_cancer()
     feature_names = wbcd.feature_names
     labels = wbcd.target_names
@@ -35,7 +39,7 @@ def load_and_log():
     with wandb.init(
         project="MLOps-2024",
         name=f"Load Raw Data ExecId-{args.IdExecution}", job_type="load-data") as run:
-
+        
         datasets = load()  # separate code for loading the datasets
         names = ["training", "validation"]
 
