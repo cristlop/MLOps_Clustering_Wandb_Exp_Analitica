@@ -12,10 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4  # Actualizado a la versión que soporta Node.js 20
+      uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v5  # Actualizado a la versión que soporta Node.js 20
-      id: setup
+      uses: actions/setup-python@v5
       with:
         python-version: '3.9'
         cache: 'pip'
@@ -31,4 +30,6 @@ jobs:
         wandb login ${{ secrets.WANDB_API_KEY }}
         echo "Inicio de sesión exitoso."
     - name: Run load.py
-      run: python src/data/load.py --IdExecution ${{ github.run_number }}
+      run: |
+        echo "Ejecutando load.py..."
+        python src/data/load.py --IdExecution ${{ github.run_number }}
