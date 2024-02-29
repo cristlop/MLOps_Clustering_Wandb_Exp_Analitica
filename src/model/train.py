@@ -166,4 +166,23 @@ def evaluate_and_log(experiment_id='99', config=None, model=None, X_test=None, y
     with wandb.init(project="MLOps-2024", name=f"Eval Model ExecId-{args.IdExecution} Experiment-{experiment_id}"):
         data = run.use_artifact('mnist-preprocess:latest')
         data_dir = data.download()
-        testing
+        testing_set = read(data_dir, "test")
+
+        test_loader = torch.utils.data.DataLoader(testing_set, batch_size=128, shuffle=False)
+
+        loss, accuracy, highest_losses, hardest_examples, true_labels, preds = evaluate(model, test_loader)
+
+        run.summary.update({"loss": loss, "accuracy": accuracy})
+
+        wandb.log({"high-loss-examples":
+            [wandb.Image(hard_example, caption=str(int(pred)) + "," +  str(int(label)))
+             for hard_example, pred, label in zip(hardest_examples, preds, true_labels)]})
+
+epochs = [50, 100, 200]
+for id, epoch in enumerate(epochs):
+    train_config = {"batch_size": 128,
+                    "epochs": epoch,
+                    "batch_log_interval": 25,
+                    "optimizer": "Adam"}
+    model = train_and_log(train_config, id)
+    evaluate_and_log(id)
