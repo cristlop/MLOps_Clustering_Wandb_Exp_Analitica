@@ -8,7 +8,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import plot_roc_curve, plot_precision_recall_curve
 from sklearn.utils import class_weight
 
-
 import os
 import argparse
 import wandb
@@ -165,4 +164,9 @@ def train_and_log(config, experiment_id='99'):
     return model
 
 def evaluate_and_log(experiment_id='99', config=None, model=None, X_test=None, y_test=None):
-    with wandb.init(project="MLOps-2024", name=f"Eval Model ExecId-{args.IdExecution} Experiment
+    with wandb.init(project="MLOps-2024", name=f"Eval Model ExecId-{args.IdExecution} Experiment-{experiment_id}"):
+        data = run.use_artifact('mnist-preprocess:latest')
+        data_dir = data.download()
+        testing_set = read(data_dir, "test")
+
+        test_loader = torch.utils.data.DataLoader
