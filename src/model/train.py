@@ -125,7 +125,7 @@ def get_hardest_k_examples(model, testing_set, k=32):
 
 def train_and_log(config, experiment_id='99'):
     with wandb.init(
-        project="MLOps-Pycon2023", 
+        project="MLOps-2024", 
         name=f"Train Model ExecId-{args.IdExecution} ExperimentId-{experiment_id}", 
         job_type="train-model", config=config) as run:
         config = wandb.config
@@ -164,4 +164,4 @@ def train_and_log(config, experiment_id='99'):
     return model
 
 def evaluate_and_log(experiment_id='99', config=None, model=None, X_test=None, y_test=None):
-    with wandb.init(project="MLOps-Pycon2023", name=f"Eval Model ExecId-{args.IdExecution} ExperimentId
+    with wandb.init(project="MLOps-2024", name=f"Eval Model ExecId-{args.IdExecution} Experiment
