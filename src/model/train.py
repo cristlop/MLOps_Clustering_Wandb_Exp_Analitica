@@ -165,5 +165,3 @@ def train_and_log(config, experiment_id='99'):
 
 def evaluate_and_log(experiment_id='99', config=None, model=None, X_test=None, y_test=None):
     with wandb.init(project="MLOps-Pycon2023", name=f"Eval Model ExecId-{args.IdExecution} ExperimentId-{experiment_id}", job_type="eval-model", config=config) as run:
-        if model is None:
-            raise ValueError("Please provide a trained model for evaluation
