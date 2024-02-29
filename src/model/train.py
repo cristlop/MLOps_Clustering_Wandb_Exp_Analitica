@@ -1,111 +1,169 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
+from torch import nn 
+from torch.utils.data import TensorDataset
 from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_curve, auc
-import matplotlib.pyplot as plt
+from sklearn.metrics import plot_roc_curve, plot_precision_recall_curve
+from sklearn.utils import class_weight
+
+import os
+import argparse
 import wandb
-
-# Define the Classifier model
-class Classifier(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(Classifier, self).__init__()
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, output_size)
-
-    def forward(self, x):
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return x
+from torch.utils.data import DataLoader
 
 # Load data
 wbcd = load_breast_cancer()
 feature_names = wbcd.feature_names
 labels = wbcd.target_names
 
-X_train, X_test, y_train, y_test = train_test_split(wbcd.data, wbcd.target, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(wbcd.data, wbcd.target, test_size=0.2)
 
-# Convert data to PyTorch tensors
-X_train_tensor = torch.FloatTensor(X_train)
-y_train_tensor = torch.LongTensor(y_train)
-X_test_tensor = torch.FloatTensor(X_test)
-y_test_tensor = torch.LongTensor(y_test)
+# Train model, get predictions
+model = RandomForestClassifier()
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+y_probas = model.predict_proba(X_test)
 
-# Hyperparameters
-input_size = X_train.shape[1]
-hidden_size = 64
-output_size = 2  # binary classification
+# Device configuration
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print("Device: ", device)
 
-# Initialize the Classifier
-model = Classifier(input_size, hidden_size, output_size)
+def read(data_dir, split):
+    filename = split + ".pt"
+    x, y = torch.load(os.path.join(data_dir, filename))
+    return TensorDataset(x, y)
 
-# Loss and optimizer
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+def train(model, train_loader, valid_loader, config):
+    optimizer = getattr(torch.optim, config.optimizer)(model.parameters())
+    model.train()
+    example_ct = 0
+    for epoch in range(config.epochs):
+        for batch_idx, (data, target) in enumerate(train_loader):
+            data, target = data.to(device), target.to(device)
+            data = data.view(data.shape[0], -1)
+            optimizer.zero_grad()
+            output = model(data)
+            loss = F.cross_entropy(output, target)
+            loss.backward()
+            optimizer.step()
+            example_ct += len(data)
 
-# Training
-epochs = 50
-for epoch in range(epochs):
-    # Forward pass
-    outputs = model(X_train_tensor)
-    loss = criterion(outputs, y_train_tensor)
+            if batch_idx % config.batch_log_interval == 0:
+                print('Train Epoch: {} [{}/{} ({:.0%})]\tLoss: {:.6f}'.format(
+                    epoch, batch_idx * len(data), len(train_loader.dataset),
+                    batch_idx / len(train_loader), loss.item()))
+                
+                train_log(loss, example_ct, epoch)
 
-    # Backward and optimize
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+        # evaluar el modelo en el conjunto de validación en cada época
+        loss, accuracy = test(model, valid_loader)  
+        test_log(loss, accuracy, example_ct, epoch)
 
-    if (epoch+1) % 10 == 0:
-        print(f'Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.4f}')
+def test(model, test_loader):
+    model.eval()
+    test_loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            data = data.view(data.shape[0], -1)
+            output = model(data)
+            test_loss += F.cross_entropy(output, target, reduction='sum')
+            pred = output.argmax(dim=1, keepdim=True)
+            correct += pred.eq(target.view_as(pred)).sum()
 
-# Evaluation
-model.eval()
-with torch.no_grad():
-    y_pred_tensor = model(X_test_tensor)
-    _, predicted = torch.max(y_pred_tensor, 1)
-    correct = (predicted == y_test_tensor).sum().item()
-    total = y_test_tensor.size(0)
-    accuracy = correct / total
-    print(f'Accuracy on test set: {accuracy:.2%}')
+    test_loss /= len(test_loader.dataset)
+    accuracy = 100. * correct / len(test_loader.dataset)
+    
+    return test_loss, accuracy
 
-# ROC Curve
-y_probas = model(X_test_tensor).softmax(dim=1).detach().numpy()
-fpr, tpr, _ = roc_curve(y_test, y_probas[:, 1])
-roc_auc = auc(fpr, tpr)
+def train_log(loss, example_ct, epoch):
+    loss = float(loss)
+    wandb.log({"epoch": epoch, "train/loss": loss}, step=example_ct)
+    print(f"Loss after " + str(example_ct).zfill(5) + f" examples: {loss:.3f}")
 
-# WandB initialization
-wandb.init(project='my-scikit-integration', name="classification")
+def test_log(loss, accuracy, example_ct, epoch):
+    loss = float(loss)
+    accuracy = float(accuracy)
+    wandb.log({"epoch": epoch, "validation/loss": loss, "validation/accuracy": accuracy}, step=example_ct)
+    print(f"Loss/accuracy after " + str(example_ct).zfill(5) + f" examples: {loss:.3f}/{accuracy:.3f}")
 
-# WandB sklearn plots
-wandb.sklearn.plot_class_proportions(y_train, y_test, labels)
+def evaluate(model, test_loader):
+    loss, accuracy = test(model, test_loader)
+    highest_losses, hardest_examples, true_labels, predictions = get_hardest_k_examples(model, test_loader.dataset)
+    return loss, accuracy, highest_losses, hardest_examples, true_labels, predictions
 
-# Convert PyTorch tensors to NumPy arrays for sklearn plots
-X_train_numpy, X_test_numpy, y_train_numpy, y_test_numpy = (
-    X_train.numpy(), X_test.numpy(), y_train.numpy(), y_test.numpy()
-)
+def get_hardest_k_examples(model, testing_set, k=32):
+    model.eval()
+    loader = DataLoader(testing_set, 1, shuffle=False)
+    losses = None
+    predictions = None
+    with torch.no_grad():
+        for data, target in loader:
+            data, target = data.to(device), target.to(device)
+            data = data.view(data.shape[0], -1)
+            output = model(data)
+            loss = F.cross_entropy(output, target)
+            pred = output.argmax(dim=1, keepdim=True)
+            
+            if losses is None:
+                losses = loss.view((1, 1))
+                predictions = pred
+            else:
+                losses = torch.cat((losses, loss.view((1, 1))), 0)
+                predictions = torch.cat((predictions, pred), 0)
 
-wandb.sklearn.plot_learning_curve(model, X_train_numpy, y_train_numpy)
+    argsort_loss = torch.argsort(losses, dim=0).cpu()
+    highest_k_losses = losses[argsort_loss[-k:]]
+    hardest_k_examples = testing_set[argsort_loss[-k:]][0]
+    true_labels = testing_set[argsort_loss[-k:]][1]
+    predicted_labels = predictions[argsort_loss[-k:]]
 
-wandb.sklearn.plot_roc(y_test_numpy, y_probas, labels)
+    return highest_k_losses, hardest_k_examples, true_labels, predicted_labels
 
-wandb.sklearn.plot_precision_recall(y_test_numpy, y_probas, labels)
+def train_and_log(config, experiment_id='99'):
+    with wandb.init(
+        project="MLOps-Pycon2023", 
+        name=f"Train Model ExecId-{args.IdExecution} ExperimentId-{experiment_id}", 
+        job_type="train-model", config=config) as run:
+        config = wandb.config
+        data = run.use_artifact('mnist-preprocess:latest')
+        data_dir = data.download()
 
-# Feature importances plot for RandomForestClassifier
-model_rf = RandomForestClassifier()
-model_rf.fit(X_train_numpy, y_train_numpy)
-wandb.sklearn.plot_feature_importances(model_rf, feature_names)
+        training_dataset =  read(data_dir, "training")
+        validation_dataset = read(data_dir, "validation")
 
-# Classifier plot for RandomForestClassifier
-wandb.sklearn.plot_classifier(model_rf, 
-                              X_train_numpy, X_test_numpy, 
-                              y_train_numpy, y_test_numpy, 
-                              model_rf.predict(X_test_numpy), model_rf.predict_proba(X_test_numpy), 
-                              labels, 
-                              is_binary=True, 
-                              model_name='RandomForest')
+        train_loader = DataLoader(training_dataset, batch_size=config.batch_size)
+        validation_loader = DataLoader(validation_dataset, batch_size=config.batch_size)
+        
+        model_artifact = run.use_artifact("linear:latest")
+        model_dir = model_artifact.download()
+        model_path = os.path.join(model_dir, "initialized_model_linear.pth")
+        model_config = model_artifact.metadata
+        config.update(model_config)
 
-# Finish WandB run
-wandb.finish()
+        model = Classifier(**model_config)
+        model.load_state_dict(torch.load(model_path))
+        model = model.to(device)
+ 
+        train(model, train_loader, validation_loader, config)
+
+        model_artifact = wandb.Artifact(
+            "trained-model", type="model",
+            description="Trained NN model",
+            metadata=dict(model_config))
+
+        torch.save(model.state_dict(), "trained_model.pth")
+        model_artifact.add_file("trained_model.pth")
+        wandb.save("trained_model.pth")
+
+        run.log_artifact(model_artifact)
+
+    return model
+
+def evaluate_and_log(experiment_id='99', config=None, model=None, X_test=None, y_test=None):
+    with wandb.init(project="MLOps-Pycon2023", name=f"Eval Model ExecId-{args.IdExecution} ExperimentId-{experiment_id}", job_type="eval-model", config=config) as run:
+        if model is None:
+            raise ValueError("Please provide a trained model for evaluation
